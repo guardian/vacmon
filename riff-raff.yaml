@@ -1,0 +1,19 @@
+stacks: [flexible]
+regions: [eu-west-1]
+
+deployments:
+  vacmon:
+    type: aws-lambda
+    parameters:
+      bucket: vacmon-dist
+      functionNames: [vacmon-]
+      fileName: vacmon.zip
+      prefixStack: false
+    dependencies: [vacmon-cfn]
+  vacmon-cfn:
+    type: cloud-formation
+    app: vacmon
+    parameters:
+      prependStackToCloudFormationStackName: false
+      cloudFormationStackName: vacmon
+      templatePath: cfn.yaml

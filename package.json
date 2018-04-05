@@ -1,0 +1,24 @@
+{
+    "name": "vacmon",
+    "description": "Monitor autovacuuming",
+    "isAwsLambda": true,
+    "cloudformation": "./cfn.yaml",
+    "projectName": "editorial-tools:vacmon",
+    "cloudformationAppTag": "vacmon",
+    "riffraffFile": "./riff-raff.yaml",
+    "buildDir": "./build/",
+    "scripts": {
+        "build": "cp *.js build/. && cp -r node_modules ./build/node_modules ; babel index.js --out-file build/index.js && ARTEFACT_PATH=$PWD riffraff-artefact"
+    },
+    "dependencies": {
+        "@guardian/elk-kinesis-logger": "0.2.0",
+        "pg": "7.4.1"
+    },
+    "devDependencies": {
+        "aws-sdk": "^2.35.0",
+        "babel-core": "^6.26.0",
+        "babel-plugin-transform-async-to-generator": "^6.24.1",
+        "babel-preset-env": "^1.6.1",
+        "node-riffraff-artefact": "^2.0.1"
+    }
+}

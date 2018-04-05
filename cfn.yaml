@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+    Stack:
+        Description: Stack name
+        Type: String
+        Default: flexible
+    App:
+        Description: Application name
+        Type: String
+        Default: vacmon
+    Stage:
+        Description: Stage name
+        Type: String
+        AllowedValues:
+            - CODE
+            - PROD
+        Default: CODE
+    BuildBucket:
+        Description: The bucket where RiffRaff puts the artifacts
+        Type: String
+        Default: composer-dist
+    ConfigBucket:
+        Description: The bucket where the config goes
+        Type: String
+        Default: guconf-flexible
+    LogStreamArn:
+        Description: ARN of the log stream
+        Type: String
+        Default: 'arn:aws:kinesis:eu-west-1:743583969668:stream/elk-PROD-KinesisStream-1PYU4KS1UEQA'
+    FlexibleVpcId:
+        Description: Flexible API VPC id
+        Type: String
+        Default: vpc-381fa95d
+    PrivateVpcSubnets:
+        Description: Flexible API subnet ids
+        Type: List<AWS::EC2::Subnet::Id>
+        Default: subnet-c2620fa7,subnet-2a37bd5d,subnet-2967c870
+
+Mappings:
+    Dumb:
+        BuildBucketKeys:
+            CODE: vacmon/CODE/vacmon.zip
+            PROD: vacmon/PROD/vacmon.zip
+        ConfigBucketKeys:
+            CODE: vacmon/CODE.json
+            PROD: vacmon/PROD.json
+
+Resources:
+    VacmonRole:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Statement:
+                    - Effect: Allow
+                      Action: sts:AssumeRole
+                      Principal:
+                          Service:
+                              - lambda.amazonaws.com
+            Path: /
+            Policies:
+                - PolicyName: VacmonRolePolicy
+                  PolicyDocument:
+                      Statement:
+                          - Effect: Allow
+                            Action:
+                                - ec2:CreateNetworkInterface
+                                - ec2:DescribeNetworkInterfaces
+                                - ec2:DetachNetworkInterface
+                                - ec2:DeleteNetworkInterface
+                            Resource: "*"
+                          - Effect: Allow
+                            Action:
+                                - s3:GetObject
+                            Resource:
+                                - !Sub ['arn:aws:s3:::${Bucket}/${Key}', {Bucket: !Ref 'BuildBucket', Key: !FindInMap [Dumb, BuildBucketKeys, !Ref Stage]}]
+                                - !Sub ['arn:aws:s3:::${Bucket}/${Key}', {Bucket: !Ref 'ConfigBucket', Key: !FindInMap [Dumb, ConfigBucketKeys, !Ref Stage]}]
+                          - Effect: Allow
+                            Action:
+                                - kinesis:PutRecord
+                                - kinesis:PutRecords
+                            Resource: !Ref LogStreamArn
+                          - Effect: Allow
+                            Action:
+                                - logs:CreateLogGroup
+                                - logs:CreateLogStream
+                                - logs:PutLogEvents
+                            Resource: '*'
+    VacmonSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Vacuum monitoring security group
+            VpcId: !Ref FlexibleVpcId
+
+    VacmonLambda:
+        Type: AWS::Lambda::Function
+        Properties:
+            FunctionName: !Sub ${App}-${Stage}
+            Description: Log live and dead tuples on postgres tables
+            Handler: index.main
+            Code:
+                S3Bucket: !Ref BuildBucket
+                S3Key: !FindInMap [Dumb, BuildBucketKeys, !Ref 'Stage']
+            Environment:
+                Variables:
+                    REGION: !Ref 'AWS::Region'
+                    STAGE: !Ref Stage
+                    STACK: !Ref Stack
+                    APP: !Ref App
+                    CONFIG_BUCKET: !Ref 'ConfigBucket'
+            MemorySize: 512
+            Role: !GetAtt [VacmonRole, Arn]
+            Runtime: nodejs6.10
+            Timeout: 180
+            VpcConfig:
+                SubnetIds: !Ref PrivateVpcSubnets
+                SecurityGroupIds:
+                    - !Ref VacmonSecurityGroup
+
+    VacmonSchedulingRule:
+        Type: AWS::Events::Rule
+        Properties:
+            ScheduleExpression: rate(1 minute)
+            Targets:
+                - Id: VacmonSchedulingRule
+                  Arn:
+                      Fn::GetAtt:
+                      - VacmonLambda
+                      - Arn
+
+    InvokeSchedulingLambdaPermission:
+        Type: AWS::Lambda::Permission
+        Properties:
+            FunctionName:
+                Fn::GetAtt:
+                - VacmonLambda
+                - Arn
+            Action: lambda:InvokeFunction
+            Principal: events.amazonaws.com
+            SourceArn:
+                Fn::GetAtt:
+                - VacmonSchedulingRule
+                - Arn
